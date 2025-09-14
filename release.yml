@@ -1,0 +1,112 @@
+# .github/workflows/release.yml
+# Este workflow automatiza la creación de releases cuando haces push de un tag
+
+name: Auto Release APK
+
+on:
+  push:
+    tags:
+      - 'v*' # Se activa cuando pusheas tags como v1.0.0, v1.0.1, etc.
+  workflow_dispatch: # Permite ejecutar manualmente desde GitHub
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout código
+      uses: actions/checkout@v3
+    
+    - name: Setup Java
+      uses: actions/setup-java@v3
+      with:
+        distribution: 'temurin'
+        java-version: '17'
+    
+    - name: Setup Android SDK
+      uses: android-actions/setup-android@v2
+    
+    - name: Grant execute permission for gradlew
+      run: chmod +x gradlew
+      working-directory: ./android # Ajusta según tu estructura
+    
+    - name: Build APK
+      run: ./gradlew assembleRelease
+      working-directory: ./android # Ajusta según tu estructura
+    
+    - name: Sign APK
+      id: sign_apk
+      uses: r0adkll/sign-android-release@v1
+      with:
+        releaseDirectory: android/app/build/outputs/apk/release
+        signingKeyBase64: ${{ secrets.SIGNING_KEY }}
+        alias: ${{ secrets.ALIAS }}
+        keyStorePassword: ${{ secrets.KEY_STORE_PASSWORD }}
+        keyPassword: ${{ secrets.KEY_PASSWORD }}
+    
+    - name: Rename APK
+      run: |
+        mv ${{steps.sign_apk.outputs.signedReleaseFile}} vlx-inventario.apk
+    
+    - name: Create Release
+      id: create_release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ github.ref }}
+        release_name: Release ${{ github.ref }}
+        body: |
+          ## 🎉 Nueva versión disponible
+          
+          ### ✨ Novedades
+          - Mejoras en el rendimiento
+          - Corrección de errores
+          - Nueva funcionalidad de sincronización
+          
+          ### 📱 Instalación
+          1. Descarga el archivo APK
+          2. Abre el archivo en tu dispositivo Android
+          3. Sigue las instrucciones de instalación
+          
+          ### 🔄 Actualización automática
+          La app verificará automáticamente nuevas versiones
+        draft: false
+        prerelease: false
+    
+    - name: Upload APK to Release
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./vlx-inventario.apk
+        asset_name: vlx-inventario.apk
+        asset_content_type: application/vnd.android.package-archive
+
+  deploy-web:
+    needs: build-and-release
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout código
+      uses: actions/checkout@v3
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: '18'
+    
+    - name: Install dependencies
+      run: npm ci
+      working-directory: ./web # Ajusta según tu estructura
+    
+    - name: Build web app
+      run: npm run build
+      working-directory: ./web # Ajusta según tu estructura
+    
+    - name: Deploy to GitHub Pages
+      uses: peaceiris/actions-gh-pages@v3
+      with:
+        github_token: ${{ secrets.GITHUB_TOKEN }}
+        publish_dir: ./web/dist # Ajusta según tu estructura
